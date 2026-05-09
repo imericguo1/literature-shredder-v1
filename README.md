@@ -47,16 +47,6 @@ DEEPSEEK_MODEL=deepseek-v4-pro ruby server.rb
 
 ## 部署
 
-### Docker
-
-```bash
-docker build -t literature-shredder-v1 .
-docker run --rm -p 4567:4567 \
-  -e BIND_ADDRESS=0.0.0.0 \
-  -e DEEPSEEK_API_KEY=你的密钥 \
-  literature-shredder-v1
-```
-
 ### Render
 
 仓库里包含 `render.yaml`。部署时建议设置：
@@ -64,6 +54,16 @@ docker run --rm -p 4567:4567 \
 - `BIND_ADDRESS=0.0.0.0`
 - `PORT=4567`
 - `DEEPSEEK_API_KEY`：可选；不填则使用者在页面里填写自己的 Key
+
+### Netlify
+
+当前公网版本使用 Netlify 静态站点 + Netlify Functions：
+
+- `public/`：前端页面
+- `netlify/functions/health.mjs`：服务状态检查
+- `netlify/functions/analyze.mjs`：PDF 文本提取与 DeepSeek 分析
+
+Netlify Functions 对请求体大小有限制，公网版建议上传小到中等大小的可复制文字 PDF；较大的 PDF 建议压缩或分批分析。
 
 ## 注意
 

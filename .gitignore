@@ -6,3 +6,6 @@ company_credit_workflow/output/
 company_credit_workflow/web_jobs/
 tmp/
 log/
+
+# Local Netlify folder
+.netlify

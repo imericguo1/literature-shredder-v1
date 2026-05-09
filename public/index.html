@@ -3,131 +3,156 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Media Digest</title>
+    <title>文献粉碎机 V1.0</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="page">
       <header class="topbar">
-        <a class="brand-mark" href="/" aria-label="Media Digest 首页">
-          <span class="mark-window">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-        </a>
-        <div id="service-state" class="service-state">本地服务检查中</div>
+        <a class="brand" href="/" aria-label="文献粉碎机首页">Paper Digest</a>
+        <div id="service-state" class="service-state">服务检查中</div>
       </header>
 
-      <section class="workspace" aria-label="媒体信息流工作区">
+      <section class="intro-section">
+        <div class="intro-copy">
+          <p class="eyebrow">Academic intelligence</p>
+          <h1>文献粉碎机V1.0</h1>
+          <p class="intro-lede">上传 PDF，自动梳理主要观点、论证过程、核心语句与原始引用文献。</p>
+        </div>
+        <figure class="intro-visual" aria-label="论文分析视觉图">
+          <img src="/assets/paper-digest-hero.png" alt="简约风格的论文分析工作台视觉图" />
+        </figure>
+      </section>
+
+      <section class="workspace" aria-label="论文分析工作区">
         <aside class="control-panel">
-          <form id="digest-form" class="control-stack">
+          <form id="analyze-form" class="upload-panel">
             <div class="panel-heading">
-              <div class="title-graphic" aria-label="媒体信息流">
-                <span class="title-bars">
-                  <i></i>
-                  <i></i>
-                  <i></i>
+              <p class="eyebrow">Start</p>
+              <h2 class="panel-icon-title" aria-label="上传论文">
+                <span class="upload-glyph" aria-hidden="true">
+                  <svg viewBox="0 0 96 96" role="img">
+                    <path d="M24 15h33l15 15v51H24z" />
+                    <path d="M57 15v15h15" />
+                    <path d="M48 62V36" />
+                    <path d="M37 47l11-11 11 11" />
+                    <path d="M36 71h24" />
+                  </svg>
                 </span>
-                <span class="title-dot"></span>
-              </div>
+              </h2>
             </div>
 
             <label class="field">
-              <span>时间范围</span>
-              <select id="hours-select" name="hours">
-                <option value="12">最近 12 小时</option>
-                <option value="24" selected>最近 24 小时</option>
-                <option value="48">最近 48 小时</option>
-                <option value="72">最近 3 天</option>
-              </select>
+              <span>DeepSeek API Key</span>
+              <input id="api-key" name="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
             </label>
 
             <label class="checkbox-row">
-              <input id="auto-refresh" type="checkbox" checked />
-              <span>打开页面后自动抓取，并每 24 小时更新</span>
+              <input id="remember-key" type="checkbox" />
+              <span>在本机浏览器记住 Key</span>
             </label>
 
-            <section id="sidebar-summary" class="sidebar-summary empty-sidebar">
-              <p class="sidebar-empty">抓取后会在这里显示简报概览。</p>
-            </section>
+            <label class="field">
+              <span>分析模型</span>
+              <select id="model-select" name="model">
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="deepseek-reasoner">deepseek-reasoner</option>
+              </select>
+            </label>
 
-            <details class="source-section">
-              <summary>
-                <h2>媒体源</h2>
-                <span id="source-count-label">默认全选</span>
-              </summary>
-              <button id="select-all-button" type="button" class="secondary compact-button">全选 / 取消</button>
-              <div id="source-list" class="source-list"></div>
-            </details>
-
-            <details class="advanced">
-              <summary>DeepSeek 汇总</summary>
-              <label class="field">
-                <span>API Key</span>
-                <input id="api-key" name="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
-              </label>
-              <label class="checkbox-row">
-                <input id="remember-key" type="checkbox" />
-                <span>在本机浏览器记住 Key</span>
-              </label>
-              <label class="field">
-                <span>模型</span>
-                <select id="model-select" name="model">
-                  <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-                  <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-                  <option value="deepseek-chat">deepseek-chat</option>
-                  <option value="deepseek-reasoner">deepseek-reasoner</option>
-                </select>
-              </label>
-            </details>
-
-            <div class="action-row">
-              <button id="refresh-button" type="submit">抓取并汇总</button>
-              <button id="export-button" type="button" class="secondary" disabled>导出 Markdown</button>
+            <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="上传论文 PDF">
+              <div class="drop-zone-copy">
+                <strong>拖拽或选择 PDF</strong>
+                <p>支持多篇论文批量分析</p>
+              </div>
+              <div class="field file-field">
+                <span>论文 PDF</span>
+                <input id="papers" name="papers" type="file" accept="application/pdf" multiple />
+              </div>
             </div>
+
+            <div id="file-list" class="file-list"></div>
+            <div class="action-row">
+              <button id="submit-button" type="submit">开始分析</button>
+              <button id="clear-button" type="button" class="secondary">清空文件</button>
+            </div>
+            <p class="hint">公网版建议单次上传 1-2 篇、小到中等大小的可复制文字 PDF。</p>
           </form>
         </aside>
 
         <section class="results-shell">
           <div class="results-toolbar">
             <div>
-              <p class="eyebrow">Brief</p>
-              <h2>今日简报</h2>
+              <p class="eyebrow">Result</p>
+              <h2>分析结果</h2>
             </div>
             <div id="status" class="status"></div>
-          </div>
-
-          <section class="feed-section">
-            <div class="section-heading">
-              <h2>报道列表</h2>
-              <div id="feed-count" class="meta"></div>
+            <div class="export-row">
+              <button id="copy-button" type="button" class="secondary" disabled>复制结果</button>
+              <button id="export-button" type="button" class="secondary" disabled>导出 Markdown</button>
+              <button id="json-button" type="button" class="secondary" disabled>导出 JSON</button>
+              <button id="csv-button" type="button" class="secondary" disabled>导出引用 CSV</button>
             </div>
-            <div id="feed-list" class="feed-list"></div>
-          </section>
+          </div>
+          <div id="comparison" class="comparison"></div>
+          <div id="results" class="results empty-state">
+            <h2>等待分析</h2>
+            <p>选择论文后开始分析，结果会在这里按论文分组展示。</p>
+          </div>
         </section>
       </section>
     </main>
 
-    <template id="source-template">
-      <label class="source-item">
-        <input type="checkbox" />
-        <span class="source-name"></span>
-        <span class="source-region"></span>
-      </label>
+    <template id="comparison-template">
+      <section class="comparison-card">
+        <header class="comparison-header">
+          <div>
+            <p class="eyebrow">Cross Paper View</p>
+            <h2>多篇论文对比</h2>
+          </div>
+        </header>
+        <div class="comparison-grid">
+          <section><h3>共同主题</h3><ul class="shared-topics"></ul></section>
+          <section><h3>关键差异</h3><ul class="key-differences"></ul></section>
+          <section><h3>方法比较</h3><ul class="method-comparison"></ul></section>
+          <section><h3>参考文献重合</h3><ul class="reference-overlap"></ul></section>
+        </div>
+        <section class="comparison-synthesis">
+          <h3>综合判断</h3>
+          <p class="synthesis"></p>
+        </section>
+      </section>
     </template>
 
-    <template id="feed-template">
-      <article class="feed-card">
-        <a class="feed-image-link" target="_blank" rel="noreferrer" aria-hidden="true">
-          <img class="feed-image" alt="" loading="lazy" />
-          <span class="image-badge"></span>
-        </a>
-        <div class="feed-body">
-          <div class="feed-meta"></div>
-          <h3><a target="_blank" rel="noreferrer"></a></h3>
-          <p></p>
-          <button type="button" class="expand-toggle">展开</button>
+    <template id="result-template">
+      <article class="paper-card">
+        <header class="paper-header">
+          <div>
+            <p class="paper-file"></p>
+            <h2 class="paper-title"></h2>
+          </div>
+        </header>
+        <div class="paper-grid">
+          <section>
+            <h3>主要观点</h3>
+            <p class="summary"></p>
+            <ul class="main-points"></ul>
+          </section>
+          <section>
+            <h3>论证过程</h3>
+            <div class="argument-list"></div>
+          </section>
+          <section>
+            <h3>核心语句</h3>
+            <div class="quote-list"></div>
+          </section>
+          <section>
+            <h3>引用文献</h3>
+            <div class="reference-meta"></div>
+            <div class="reference-list"></div>
+          </section>
         </div>
       </article>
     </template>

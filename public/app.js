@@ -1,29 +1,27 @@
-const form = document.getElementById("digest-form");
+const form = document.getElementById("analyze-form");
 const apiKeyInput = document.getElementById("api-key");
 const rememberKeyInput = document.getElementById("remember-key");
 const modelSelect = document.getElementById("model-select");
-const hoursSelect = document.getElementById("hours-select");
-const autoRefreshInput = document.getElementById("auto-refresh");
-const sourceList = document.getElementById("source-list");
-const selectAllButton = document.getElementById("select-all-button");
-const serviceState = document.getElementById("service-state");
+const papersInput = document.getElementById("papers");
+const dropZone = document.getElementById("drop-zone");
+const fileList = document.getElementById("file-list");
 const statusBox = document.getElementById("status");
-const sidebarSummary = document.getElementById("sidebar-summary");
-const sourceCountLabel = document.getElementById("source-count-label");
-const feedList = document.getElementById("feed-list");
-const feedCount = document.getElementById("feed-count");
-const refreshButton = document.getElementById("refresh-button");
+const serviceState = document.getElementById("service-state");
+const comparisonBox = document.getElementById("comparison");
+const resultsBox = document.getElementById("results");
+const template = document.getElementById("result-template");
+const comparisonTemplate = document.getElementById("comparison-template");
+const submitButton = document.getElementById("submit-button");
+const clearButton = document.getElementById("clear-button");
 const exportButton = document.getElementById("export-button");
-const sourceTemplate = document.getElementById("source-template");
-const feedTemplate = document.getElementById("feed-template");
+const jsonButton = document.getElementById("json-button");
+const csvButton = document.getElementById("csv-button");
+const copyButton = document.getElementById("copy-button");
 
-let sources = [];
-let latestDigest = null;
-let autoRefreshTimer = null;
-let digestPollTimer = null;
-const expandedFeedIds = new Set();
+let latestResult = null;
+let selectedFiles = [];
 
-const storedKey = window.localStorage.getItem("media-digest-deepseek-api-key");
+const storedKey = window.localStorage.getItem("paper-digest-deepseek-api-key");
 if (storedKey) {
   apiKeyInput.value = storedKey;
   rememberKeyInput.checked = true;
@@ -34,507 +32,335 @@ function setStatus(message, kind = "info") {
   statusBox.dataset.kind = kind;
 }
 
-function selectedSourceIds() {
-  return Array.from(sourceList.querySelectorAll("input[type='checkbox']:checked")).map((input) => input.value);
+function formatFileSize(bytes) {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function updateSourceCountLabel() {
-  const selected = selectedSourceIds().length;
-  sourceCountLabel.textContent = `${selected}/${sources.length || 0}`;
-}
-
-function renderSources(nextSources) {
-  sources = nextSources;
-  sourceList.innerHTML = "";
-
-  sources.forEach((source) => {
-    const node = sourceTemplate.content.cloneNode(true);
-    const input = node.querySelector("input");
-    input.value = source.id;
-    input.checked = true;
-    input.addEventListener("change", updateSourceCountLabel);
-    node.querySelector(".source-name").textContent = source.name;
-    node.querySelector(".source-region").textContent = source.region;
-    sourceList.appendChild(node);
+function setExportEnabled(enabled) {
+  [exportButton, jsonButton, csvButton, copyButton].forEach((button) => {
+    button.disabled = !enabled;
   });
-  updateSourceCountLabel();
 }
 
-function renderSummary(digest) {
-  const summary = digest.ai_summary;
-  const local = digest.summary || {};
-  const errors = digest.errors || [];
-  const warnings = digest.warnings || [];
-  const translation = digest.translation || {};
-
-  sidebarSummary.classList.remove("empty-sidebar");
-  sidebarSummary.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "sidebar-brief-header";
-  const title = document.createElement("h2");
-  title.textContent = local.headline || "今日简报";
-  const generated = document.createElement("span");
-  generated.className = "meta";
-  generated.textContent = new Date(digest.generated_at).toLocaleString("zh-CN");
-  header.append(title, generated);
-  sidebarSummary.appendChild(header);
-
-  if (summary?.editor_brief) {
-    const brief = document.createElement("p");
-    brief.className = "editor-brief";
-    brief.textContent = summary.editor_brief;
-    sidebarSummary.appendChild(brief);
-  }
-
-  const translationNote = document.createElement("p");
-  translationNote.className = "translation-note";
-  translationNote.textContent = translation.enabled
-    ? `已自动翻译 ${translation.translated_count || 0}/${translation.candidate_count || 0} 条非中文内容。`
-    : "未填写 DeepSeek API Key，非中文内容将保留原文。";
-  sidebarSummary.appendChild(translationNote);
-
-  const grid = document.createElement("div");
-  grid.className = "sidebar-brief-grid";
-  grid.appendChild(createPanel("关键进展", summary?.key_developments || local.bullets || [], "", 5));
-  grid.appendChild(createPanel("后续关注", summary?.watchlist || local.keywords || [], "", 8));
-  grid.appendChild(createPanel("来源分布", Object.entries(local.source_counts || {}).map(([name, count]) => `${name}：${count} 条`), "", 12));
-  if (summary?.source_notes?.length) {
-    grid.appendChild(createPanel("覆盖观察", summary.source_notes, "", 4));
-  }
-  if (errors.length) {
-    grid.appendChild(createPanel("抓取异常", errors.map((item) => `${item.source_name}：${item.error}`), "warning", 4));
-  }
-  if (warnings.length) {
-    grid.appendChild(createPanel("处理提示", warnings, "warning", 4));
-  }
-  sidebarSummary.appendChild(grid);
+function syncNativeFileInput() {
+  const dt = new DataTransfer();
+  selectedFiles.forEach((file) => dt.items.add(file));
+  papersInput.files = dt.files;
 }
 
-function createPanel(title, items, tone = "", limit = 8) {
-  const section = document.createElement("section");
-  section.className = tone ? `mini-panel ${tone}` : "mini-panel";
-  const heading = document.createElement("h3");
-  heading.textContent = title;
-  const list = document.createElement("ul");
-
-  if (!items.length) {
-    const empty = document.createElement("li");
-    empty.textContent = "暂无数据";
-    list.appendChild(empty);
-  } else {
-    items.slice(0, limit).forEach((item) => {
-      const li = document.createElement("li");
-      li.textContent = item;
-      list.appendChild(li);
-    });
-    if (items.length > limit) {
-      const more = document.createElement("li");
-      more.className = "more-item";
-      more.textContent = `还有 ${items.length - limit} 项`;
-      list.appendChild(more);
-    }
-  }
-
-  section.append(heading, list);
-  return section;
-}
-
-function generatedImageUrl(item) {
-  const params = new URLSearchParams({
-    title: item.title || "",
-    source: item.source_name || "",
-    region: item.source_region || ""
-  });
-  return `/api/generated-image?${params.toString()}`;
-}
-
-function escapeHtml(value) {
-  return String(value || "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "\"": "&quot;",
-    "'": "&#39;"
-  }[char]));
-}
-
-function translatedArticleDocument(article) {
-  const chineseParagraphs = Array.isArray(article.body_zh) ? article.body_zh : [];
-  const sourceParagraphs = Array.isArray(article.source_paragraphs) ? article.source_paragraphs : [];
-  const zhBody = chineseParagraphs.length
-    ? chineseParagraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")
-    : "<p>暂未提取到可展示的中文正文。</p>";
-  const originalBody = sourceParagraphs.length
-    ? sourceParagraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")
-    : "<p>No original article body was extracted.</p>";
-
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(article.title_zh || article.source_title || "中文阅读页")}</title>
-  <style>
-    :root { color-scheme: light; --text:#1d1d1f; --muted:#6e7378; --line:#e6e8ea; --accent:#0071e3; }
-    body { margin:0; background:#f5f5f7; color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    main { width:min(920px, calc(100% - 36px)); margin:0 auto; padding:34px 0 56px; }
-    article { background:rgba(255,255,255,.88); border:1px solid var(--line); border-radius:22px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,.08); }
-    a { color:var(--accent); text-decoration:none; }
-    .source { margin:0 0 18px; color:var(--muted); font-size:14px; }
-    h1 { margin:0 0 12px; font-size:clamp(28px, 5vw, 46px); line-height:1.08; letter-spacing:0; }
-    h2 { margin:34px 0 14px; font-size:22px; }
-    .summary { margin:18px 0 0; padding:16px 18px; background:#f7fbff; border:1px solid #dbeeff; border-radius:16px; color:#244565; }
-    p { font-size:18px; line-height:1.78; margin:0 0 18px; }
-    .original { border-top:1px solid var(--line); margin-top:34px; padding-top:10px; }
-    .original p { color:#3f4448; font-size:16px; line-height:1.7; }
-  </style>
-</head>
-<body>
-  <main>
-    <article>
-      <p class="source"><a href="${escapeHtml(article.url)}" target="_blank" rel="noreferrer">打开原始网页</a></p>
-      <h1>${escapeHtml(article.title_zh || article.source_title || "中文阅读页")}</h1>
-      ${article.summary_zh ? `<div class="summary">${escapeHtml(article.summary_zh)}</div>` : ""}
-      <h2>中文翻译</h2>
-      ${zhBody}
-      <section class="original">
-        <h2>英文原文</h2>
-        <h1>${escapeHtml(article.source_title || "")}</h1>
-        ${originalBody}
-      </section>
-    </article>
-  </main>
-</body>
-</html>`;
-}
-
-async function openTranslatedArticle(item, readerWindow) {
-  const apiKey = apiKeyInput.value.trim();
-  if (!apiKey) {
-    readerWindow.close();
-    setStatus("请先填写 DeepSeek API Key，再打开中文阅读页。", "error");
+function renderFileList() {
+  fileList.innerHTML = "";
+  if (!selectedFiles.length) {
+    fileList.innerHTML = '<p class="file-pill muted">还没有选择文件</p>';
     return;
   }
 
-  try {
-    readerWindow.document.write("<p style=\"font:16px -apple-system;padding:24px;\">正在创建中文阅读页...</p>");
-    const response = await fetch("/api/article/translate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-deepseek-api-key": apiKey,
-        "x-deepseek-model": modelSelect.value
-      },
-      body: JSON.stringify({
-        url: item.url,
-        title: item.title
-      })
+  selectedFiles.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "file-pill";
+    const label = document.createElement("span");
+    label.textContent = `${file.name} · ${formatFileSize(file.size)}`;
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "icon-button";
+    removeButton.title = "移除文件";
+    removeButton.setAttribute("aria-label", `移除 ${file.name}`);
+    removeButton.textContent = "×";
+    removeButton.addEventListener("click", () => {
+      selectedFiles.splice(index, 1);
+      syncNativeFileInput();
+      renderFileList();
     });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "中文阅读页创建失败");
-    }
-    if (payload.article) {
-      readerWindow.document.open();
-      readerWindow.document.write(translatedArticleDocument(payload.article));
-      readerWindow.document.close();
-      return;
-    }
-    readerWindow.location.href = payload.url;
-  } catch (error) {
-    readerWindow.document.body.innerHTML = `<p style="font:16px -apple-system;padding:24px;color:#c2252d;">${error.message || "中文阅读页创建失败"}</p>`;
-  }
-}
-
-function renderFeed(items) {
-  feedList.innerHTML = "";
-  feedCount.textContent = `${items.length} 条`;
-
-  if (!items.length) {
-    feedList.innerHTML = '<div class="empty-list">当前时间范围内没有抓取到报道。</div>';
-    return;
-  }
-
-  items.forEach((item) => {
-    const node = feedTemplate.content.cloneNode(true);
-    const imageLink = node.querySelector(".feed-image-link");
-    const image = node.querySelector(".feed-image");
-    const badge = node.querySelector(".image-badge");
-    imageLink.href = item.url || "#";
-    const fallbackImage = generatedImageUrl(item);
-    image.src = item.image_url || fallbackImage;
-    image.alt = `${item.source_name} 新闻配图`;
-    badge.textContent = item.image_generated ? "生成图" : "原图";
-    image.addEventListener("error", () => {
-      if (image.src.endsWith(fallbackImage)) return;
-      image.src = fallbackImage;
-      badge.textContent = "生成图";
-    }, { once: true });
-
-    node.querySelector(".feed-meta").textContent = `${item.source_name} · ${item.published_label || "时间未知"}${item.translated ? " · 已翻译" : ""}`;
-    const link = node.querySelector(".feed-body h3 a");
-    link.href = item.url || "#";
-    link.textContent = item.title;
-    link.addEventListener("click", (event) => {
-      if (!card.classList.contains("expanded")) {
-        return;
-      }
-      event.preventDefault();
-      const readerWindow = window.open("about:blank", "_blank");
-      if (!readerWindow) {
-        setStatus("浏览器阻止了新窗口，请允许弹窗后重试。", "error");
-        return;
-      }
-      openTranslatedArticle(item, readerWindow);
-    });
-    if (item.translated && item.title_original) {
-      link.title = `原文标题：${item.title_original}`;
-    }
-    node.querySelector("p").textContent = item.description || "该 RSS 条目没有提供摘要。";
-    if (item.translated && item.description_original) {
-      node.querySelector("p").title = `原文摘要：${item.description_original}`;
-    }
-    const card = node.querySelector(".feed-card");
-    const toggle = node.querySelector(".expand-toggle");
-    if (expandedFeedIds.has(item.id)) {
-      card.classList.add("expanded");
-      toggle.textContent = "收起";
-      toggle.setAttribute("aria-expanded", "true");
-    } else {
-      toggle.setAttribute("aria-expanded", "false");
-    }
-    toggle.addEventListener("click", () => {
-      const expanded = card.classList.toggle("expanded");
-      if (expanded) {
-        expandedFeedIds.add(item.id);
-      } else {
-        expandedFeedIds.delete(item.id);
-      }
-      toggle.textContent = expanded ? "收起" : "展开";
-      toggle.setAttribute("aria-expanded", String(expanded));
-    });
-    feedList.appendChild(node);
+    item.append(label, removeButton);
+    fileList.appendChild(item);
   });
 }
 
-function stopDigestPolling() {
-  if (digestPollTimer) {
-    window.clearTimeout(digestPollTimer);
-    digestPollTimer = null;
-  }
-}
-
-async function pollDigestJob(jobId) {
-  try {
-    const response = await fetch(`/api/digest/jobs/${encodeURIComponent(jobId)}`);
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "后台处理状态读取失败");
-    }
-
-    latestDigest = payload;
-    renderSummary(payload);
-    renderFeed(payload.items || []);
-    exportButton.disabled = false;
-
-    const translated = payload.translation?.translated_count || 0;
-    const total = payload.translation?.candidate_count || 0;
-    if (payload.job_status === "complete") {
-      setStatus(payload.ai_summary ? "汉化完成，已生成编辑摘要。" : "汉化完成，已生成基础汇总。", "success");
-      stopDigestPolling();
-      scheduleAutoRefresh();
-      return;
-    }
-    if (payload.job_status === "failed") {
-      setStatus("后台汉化没有完成，已保留当前结果。", "error");
-      stopDigestPolling();
-      scheduleAutoRefresh();
-      return;
-    }
-
-    const action = payload.job_status === "summarizing" ? "正在生成中文简报" : "正在逐条汉化";
-    setStatus(`${action}：${translated}/${total}`, "loading");
-    digestPollTimer = window.setTimeout(() => pollDigestJob(jobId), 1800);
-  } catch (error) {
-    setStatus(error.message || "后台处理状态读取失败。", "error");
-    stopDigestPolling();
-    scheduleAutoRefresh();
-  }
-}
-
-function buildMarkdown(digest) {
-  const lines = ["# Media Digest 每日简报", ""];
-  lines.push(`生成时间：${new Date(digest.generated_at).toLocaleString("zh-CN")}`);
-  lines.push(`时间范围：最近 ${digest.window_hours} 小时`, "");
-
-  if (digest.ai_summary?.editor_brief) {
-    lines.push("## 编辑摘要", digest.ai_summary.editor_brief, "");
-  }
-
-  const developments = digest.ai_summary?.key_developments || digest.summary?.bullets || [];
-  lines.push("## 关键进展");
-  developments.forEach((item) => lines.push(`- ${item}`));
-  lines.push("");
-
-  lines.push("## 报道列表");
-  (digest.items || []).forEach((item) => {
-    lines.push(`- [${item.source_name}] ${item.title}`);
-    if (item.url) lines.push(`  ${item.url}`);
+function setFiles(fileListLike) {
+  const incoming = Array.from(fileListLike || []).filter((file) => {
+    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   });
 
+  incoming.forEach((file) => {
+    const duplicate = selectedFiles.some((existing) => {
+      return existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified;
+    });
+    if (!duplicate) selectedFiles.push(file);
+  });
+
+  syncNativeFileInput();
+  renderFileList();
+  setStatus(incoming.length ? `已选择 ${selectedFiles.length} 个 PDF 文件。` : "这里只支持 PDF 文件。", incoming.length ? "info" : "error");
+}
+
+function createList(items, className) {
+  const ul = document.createElement("ul");
+  ul.className = className;
+  (items || []).forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+function createFallbackList(targetClass, emptyText) {
+  return createList([emptyText], targetClass);
+}
+
+function renderArgumentProcess(list, target) {
+  target.innerHTML = "";
+  (list || []).forEach((item, index) => {
+    const block = document.createElement("article");
+    block.className = "stack-item";
+    const marker = document.createElement("div");
+    marker.className = "stack-index";
+    marker.textContent = String(index + 1).padStart(2, "0");
+    const body = document.createElement("div");
+    body.className = "stack-body";
+    const title = document.createElement("h4");
+    title.textContent = item.step || `步骤 ${index + 1}`;
+    const reasoning = document.createElement("p");
+    reasoning.textContent = item.reasoning || "";
+    const evidence = document.createElement("p");
+    evidence.className = "evidence";
+    evidence.textContent = item.evidence || "";
+    body.append(title, reasoning, evidence);
+    block.append(marker, body);
+    target.appendChild(block);
+  });
+}
+
+function renderQuotes(list, target) {
+  target.innerHTML = "";
+  (list || []).forEach((item) => {
+    const quote = document.createElement("article");
+    quote.className = "quote-card";
+    const quoteText = document.createElement("blockquote");
+    quoteText.textContent = item.quote || "";
+    const reason = document.createElement("p");
+    reason.textContent = item.why_it_matters || "";
+    quote.append(quoteText, reason);
+    if (item.location_hint) {
+      const location = document.createElement("span");
+      location.className = "location";
+      location.textContent = item.location_hint;
+      quote.appendChild(location);
+    }
+    target.appendChild(quote);
+  });
+}
+
+function renderReferences(list, metaTarget, listTarget) {
+  metaTarget.textContent = `共识别到 ${(list || []).length} 条引用记录`;
+  listTarget.innerHTML = "";
+  const ol = document.createElement("ol");
+  ol.className = "raw-reference-list";
+  (list || []).forEach((item, index) => {
+    const ref = document.createElement("li");
+    ref.className = "raw-reference-item";
+    ref.value = index + 1;
+    ref.textContent = item.raw_citation || "未识别到原始引用文本";
+    ol.appendChild(ref);
+  });
+  listTarget.appendChild(ol);
+}
+
+function renderComparison(comparison) {
+  comparisonBox.innerHTML = "";
+  if (!comparison || !comparison.available) return;
+  const node = comparisonTemplate.content.cloneNode(true);
+  node.querySelector(".shared-topics").replaceWith((comparison.shared_topics || []).length ? createList(comparison.shared_topics, "shared-topics") : createFallbackList("shared-topics", "未识别到明确共同主题"));
+  node.querySelector(".key-differences").replaceWith((comparison.key_differences || []).length ? createList(comparison.key_differences, "key-differences") : createFallbackList("key-differences", "未识别到明显分歧"));
+  node.querySelector(".method-comparison").replaceWith((comparison.method_comparison || []).length ? createList(comparison.method_comparison, "method-comparison") : createFallbackList("method-comparison", "方法层面对比信息不足"));
+  node.querySelector(".reference-overlap").replaceWith((comparison.reference_overlap || []).length ? createList(comparison.reference_overlap, "reference-overlap") : createFallbackList("reference-overlap", "未识别到明显重合引用"));
+  node.querySelector(".synthesis").textContent = comparison.synthesis || "";
+  comparisonBox.appendChild(node);
+}
+
+function renderResults(documents) {
+  resultsBox.innerHTML = "";
+  resultsBox.classList.remove("empty-state");
+  (documents || []).forEach((doc) => {
+    const node = template.content.cloneNode(true);
+    node.querySelector(".paper-file").textContent = doc.filename || "";
+    node.querySelector(".paper-title").textContent = doc.document_title || "未识别标题";
+    node.querySelector(".summary").textContent = doc.summary || "";
+    node.querySelector(".main-points").replaceWith(createList(doc.main_points || [], "main-points"));
+    renderArgumentProcess(doc.argument_process, node.querySelector(".argument-list"));
+    renderQuotes(doc.core_quotes, node.querySelector(".quote-list"));
+    renderReferences(doc.references, node.querySelector(".reference-meta"), node.querySelector(".reference-list"));
+    resultsBox.appendChild(node);
+  });
+}
+
+function escapeMarkdown(text) {
+  return String(text || "").replace(/([\\`*_{}[\]()#+\-.!|>])/g, "\\$1");
+}
+
+function buildMarkdown(result) {
+  const lines = ["# 文献粉碎机分析结果", ""];
+  if (result.comparison?.available) {
+    lines.push("## 多篇论文对比", "", `**综合判断**：${result.comparison.synthesis || ""}`, "");
+    [["共同主题", result.comparison.shared_topics], ["关键差异", result.comparison.key_differences], ["方法比较", result.comparison.method_comparison], ["参考文献重合", result.comparison.reference_overlap]].forEach(([title, items]) => {
+      lines.push(`### ${title}`);
+      (items || []).forEach((item) => lines.push(`- ${escapeMarkdown(item)}`));
+      lines.push("");
+    });
+  }
+  (result.documents || []).forEach((doc, index) => {
+    lines.push(`## ${index + 1}. ${escapeMarkdown(doc.document_title || "未识别标题")}`, "", `原文件：${escapeMarkdown(doc.filename)}`, "", "### 摘要", doc.summary || "", "", "### 主要观点");
+    (doc.main_points || []).forEach((item) => lines.push(`- ${escapeMarkdown(item)}`));
+    lines.push("", "### 论证过程");
+    (doc.argument_process || []).forEach((item, stepIndex) => {
+      lines.push(`${stepIndex + 1}. ${escapeMarkdown(item.step)}`);
+      lines.push(`   - 推理：${escapeMarkdown(item.reasoning)}`);
+      lines.push(`   - 证据：${escapeMarkdown(item.evidence)}`);
+    });
+    lines.push("", "### 核心语句");
+    (doc.core_quotes || []).forEach((item) => {
+      lines.push(`- "${String(item.quote || "").replace(/"/g, '\\"')}"`);
+      lines.push(`  说明：${escapeMarkdown(item.why_it_matters)}`);
+      if (item.location_hint) lines.push(`  位置：${escapeMarkdown(item.location_hint)}`);
+    });
+    lines.push("", "### 引用文献");
+    (doc.references || []).forEach((item) => lines.push(`- ${escapeMarkdown(item.raw_citation)}`));
+    lines.push("");
+  });
   return lines.join("\n");
 }
 
-function exportMarkdown() {
-  if (!latestDigest) return;
-
-  const blob = new Blob([buildMarkdown(latestDigest)], { type: "text/markdown;charset=utf-8" });
+function downloadText(content, type, extension) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
+  const suffix = extension.startsWith(".") ? extension.slice(1) : extension;
   anchor.href = url;
-  anchor.download = `media-digest-${new Date().toISOString().slice(0, 10)}.md`;
+  anchor.download = `literature-shredder-${new Date().toISOString().slice(0, 10)}.${suffix}`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
 }
 
+function exportMarkdown() {
+  if (latestResult) downloadText(buildMarkdown(latestResult), "text/markdown;charset=utf-8", "md");
+}
+
+function exportJson() {
+  if (latestResult) downloadText(JSON.stringify(latestResult, null, 2), "application/json;charset=utf-8", "json");
+}
+
+function csvCell(value) {
+  return `"${String(value || "").replace(/"/g, '""')}"`;
+}
+
+function exportReferenceCsv() {
+  if (!latestResult) return;
+  const rows = [["文件名", "原始引用", "作者", "年份", "标题", "来源", "详情", "标识符", "完整度"]];
+  (latestResult.documents || []).forEach((doc) => {
+    (doc.references || []).forEach((ref) => rows.push([doc.filename, ref.raw_citation, ref.authors, ref.year, ref.title, ref.source, ref.details, ref.identifier, ref.completeness]));
+  });
+  downloadText(`\ufeff${rows.map((row) => row.map(csvCell).join(",")).join("\n")}`, "text/csv;charset=utf-8", "references.csv");
+}
+
+async function copyResult() {
+  if (!latestResult) return;
+  await navigator.clipboard.writeText(buildMarkdown(latestResult));
+  setStatus("分析结果已复制。", "success");
+}
+
 async function checkService() {
   try {
     const response = await fetch("/health");
     const payload = await response.json();
-    serviceState.textContent = payload.ok ? "本地服务已连接" : "本地服务异常";
+    serviceState.textContent = payload.ok ? "服务已连接" : "服务异常";
     serviceState.dataset.kind = payload.ok ? "success" : "error";
   } catch {
-    serviceState.textContent = "本地服务未连接";
+    serviceState.textContent = "服务未连接";
     serviceState.dataset.kind = "error";
   }
 }
 
-async function loadSources() {
-  const response = await fetch("/api/sources");
-  const payload = await response.json();
-  renderSources(payload.sources || []);
-}
-
-selectAllButton.addEventListener("click", () => {
-  const inputs = Array.from(sourceList.querySelectorAll("input[type='checkbox']"));
-  const shouldSelect = inputs.some((input) => !input.checked);
-  inputs.forEach((input) => {
-    input.checked = shouldSelect;
-  });
-  updateSourceCountLabel();
-  selectAllButton.textContent = shouldSelect ? "取消全选" : "全选";
+papersInput.addEventListener("change", (event) => setFiles(event.target.files));
+papersInput.addEventListener("click", (event) => event.stopPropagation());
+dropZone.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  dropZone.dataset.dragging = "true";
+});
+dropZone.addEventListener("dragleave", () => delete dropZone.dataset.dragging);
+dropZone.addEventListener("drop", (event) => {
+  event.preventDefault();
+  delete dropZone.dataset.dragging;
+  setFiles(event.dataTransfer.files);
+});
+dropZone.addEventListener("click", (event) => {
+  if (event.target !== papersInput) papersInput.click();
+});
+dropZone.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    papersInput.click();
+  }
 });
 
 exportButton.addEventListener("click", exportMarkdown);
-
-autoRefreshInput.addEventListener("change", () => {
-  scheduleAutoRefresh();
+jsonButton.addEventListener("click", exportJson);
+csvButton.addEventListener("click", exportReferenceCsv);
+copyButton.addEventListener("click", copyResult);
+clearButton.addEventListener("click", () => {
+  selectedFiles = [];
+  syncNativeFileInput();
+  renderFileList();
+  setStatus("文件列表已清空。", "info");
 });
-
-async function runDigest() {
-  stopDigestPolling();
-  expandedFeedIds.clear();
-  const sourceIds = selectedSourceIds();
-  if (!sourceIds.length) {
-    setStatus("请至少选择一个媒体源。", "error");
-    return;
-  }
-
-  const apiKey = apiKeyInput.value.trim();
-  if (apiKey && rememberKeyInput.checked) {
-    window.localStorage.setItem("media-digest-deepseek-api-key", apiKey);
-  } else {
-    window.localStorage.removeItem("media-digest-deepseek-api-key");
-  }
-
-  refreshButton.disabled = true;
-  exportButton.disabled = true;
-  latestDigest = null;
-  setStatus("正在抓取媒体信息流。", "loading");
-  sidebarSummary.className = "sidebar-summary empty-sidebar";
-  sidebarSummary.innerHTML = '<p class="sidebar-empty">正在读取 RSS 源并整理摘要。</p>';
-  feedList.innerHTML = "";
-  feedCount.textContent = "";
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => {
-      controller.abort();
-    }, 60000);
-
-    const response = await fetch("/api/digest", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { "x-deepseek-api-key": apiKey } : {}),
-        "x-deepseek-model": modelSelect.value
-      },
-      body: JSON.stringify({
-        source_ids: sourceIds,
-        hours: Number(hoursSelect.value)
-      })
-    });
-    window.clearTimeout(timeoutId);
-
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "抓取失败");
-    }
-
-    latestDigest = payload;
-    renderSummary(payload);
-    renderFeed(payload.items || []);
-    exportButton.disabled = false;
-    if (payload.job_id) {
-      const total = payload.translation?.candidate_count || 0;
-      setStatus(`已抓取，正在逐条汉化：0/${total}`, "loading");
-      refreshButton.disabled = false;
-      pollDigestJob(payload.job_id);
-    } else {
-      setStatus(payload.ai_summary ? "抓取完成，已生成编辑摘要。" : "抓取完成，已生成基础汇总。", "success");
-      scheduleAutoRefresh();
-    }
-  } catch (error) {
-    sidebarSummary.className = "sidebar-summary empty-sidebar";
-    sidebarSummary.innerHTML = '<p class="sidebar-empty">抓取没有完成，请根据提示调整后重试。</p>';
-    const message = error.name === "AbortError"
-      ? "DeepSeek 处理时间过长，本次请求已停止。可以减少媒体源或先关闭 DeepSeek 汇总再试。"
-      : (error.message || "抓取失败，请稍后再试。");
-    setStatus(message, "error");
-  } finally {
-    refreshButton.disabled = false;
-  }
-}
-
-function scheduleAutoRefresh() {
-  if (autoRefreshTimer) {
-    window.clearTimeout(autoRefreshTimer);
-    autoRefreshTimer = null;
-  }
-
-  if (!autoRefreshInput.checked) {
-    return;
-  }
-
-  autoRefreshTimer = window.setTimeout(() => {
-    runDigest();
-  }, 24 * 60 * 60 * 1000);
-}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  runDigest();
+  if (!selectedFiles.length) {
+    setStatus("先选择至少一个 PDF 文件。", "error");
+    return;
+  }
+  const apiKey = apiKeyInput.value.trim();
+  if (apiKey && rememberKeyInput.checked) {
+    window.localStorage.setItem("paper-digest-deepseek-api-key", apiKey);
+  } else {
+    window.localStorage.removeItem("paper-digest-deepseek-api-key");
+  }
+  const formData = new FormData();
+  selectedFiles.forEach((file) => formData.append("papers", file));
+  submitButton.disabled = true;
+  setExportEnabled(false);
+  setStatus("正在读取论文并生成结构化总结，这一步通常需要几十秒。", "loading");
+  comparisonBox.innerHTML = "";
+  resultsBox.classList.add("empty-state");
+  resultsBox.innerHTML = "<h2>正在分析</h2><p>论文内容已经提交，稍等一下。</p>";
+  latestResult = null;
+  try {
+    const response = await fetch("/analyze", {
+      method: "POST",
+      body: formData,
+      headers: {
+        ...(apiKey ? { "x-deepseek-api-key": apiKey } : {}),
+        "x-deepseek-model": modelSelect.value
+      }
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "分析失败");
+    latestResult = payload;
+    renderComparison(payload.comparison);
+    renderResults(payload.documents || []);
+    setExportEnabled(true);
+    setStatus("分析完成，可以继续上传下一批论文。", "success");
+  } catch (error) {
+    resultsBox.classList.add("empty-state");
+    resultsBox.innerHTML = "<h2>分析没有完成</h2><p>请根据提示调整后重试。</p>";
+    setStatus(error.message || "分析失败，请稍后再试。", "error");
+  } finally {
+    submitButton.disabled = false;
+  }
 });
 
+renderFileList();
 checkService();
-loadSources()
-  .then(() => {
-    if (autoRefreshInput.checked) {
-      runDigest();
-    }
-  })
-  .catch(() => setStatus("媒体源加载失败。", "error"));
